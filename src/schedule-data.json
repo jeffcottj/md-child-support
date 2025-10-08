@@ -1,0 +1,12 @@
+{
+  "combinedMonthlyIncome": [1000, 1500, 2000],
+  "byChildren": {
+    "1": [100, 150, 200],
+    "2": [150, 225, 300],
+    "3": [180, 270, 360]
+  },
+  "meta": {
+    "units": "USD per month",
+    "note": "DEMO PLACEHOLDER — not the real Maryland schedule. Replace with statutory values later."
+  }
+}
