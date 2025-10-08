@@ -1,6 +1,7 @@
 // src/calc.ts
 import * as S from "./schema";
 import * as Schedule from "./schedule";
+import { totalAddOns, splitByShare } from "./addons";
 
 /**
  * Helper: compute Adjusted Actual Income (AAI) for one parent.
@@ -62,5 +63,66 @@ export function computeBasic(
     combinedAAI,
     p1Share,
     p2Share,
+  };
+}
+
+/**
+ * Primary (Worksheet A) slice:
+ * - Requires a valid "basic" (not aboveTop).
+ * - totalObligation = basic + addOnsTotal
+ * - each parent's obligation = totalObligation × income share
+ *
+ * NOTE: We are NOT subtracting "direct pay" yet (that’s a later step).
+ */
+export function computePrimaryTotals(
+  inputs: S.CaseInputs,
+  schedule: Schedule.Schedule
+) {
+  if (inputs.custodyType !== "PRIMARY") {
+    throw new Error('computePrimaryTotals expects custodyType "PRIMARY"');
+  }
+
+  // Reuse Step 5 results
+  const base = computeBasic(inputs, schedule);
+
+  if (base.basicStatus === "aboveTop" || base.basic == null) {
+    // We can't produce a mandatory amount; return advisory info only.
+    return {
+      path: "WorksheetA" as const,
+      advisory: "aboveTopOfSchedule",
+      basic: null,
+      usedRowIncome: null,
+      p1AAI: base.p1AAI,
+      p2AAI: base.p2AAI,
+      combinedAAI: base.combinedAAI,
+      p1Share: base.p1Share,
+      p2Share: base.p2Share,
+      addOnsTotal: totalAddOns(inputs.addOns),
+      totalObligation: null,
+      p1Obligation: null,
+      p2Obligation: null,
+    };
+  }
+
+  const addOnsTotal = totalAddOns(inputs.addOns);
+  const totalObligation = base.basic + addOnsTotal;
+
+  // Allocate each parent's share of the total obligation
+  const { p1, p2 } = splitByShare(totalObligation, base.p1Share);
+
+  return {
+    path: "WorksheetA" as const,
+    advisory: null as null | "aboveTopOfSchedule",
+    basic: base.basic,                     // Worksheet A line 4
+    usedRowIncome: base.usedRowIncome,
+    p1AAI: base.p1AAI,                     // line 2 (parent 1)
+    p2AAI: base.p2AAI,                     // line 2 (parent 2)
+    combinedAAI: base.combinedAAI,         // sum line 2
+    p1Share: base.p1Share,                 // line 3 (parent 1 %)
+    p2Share: base.p2Share,                 // line 3 (parent 2 %)
+    addOnsTotal,                           // A-4a..A-4e summed
+    totalObligation,                       // Worksheet A line 5 = basic + add-ons
+    p1Obligation: p1,                      // Worksheet A line 6 (parent 1)
+    p2Obligation: p2,                      // Worksheet A line 6 (parent 2)
   };
 }
