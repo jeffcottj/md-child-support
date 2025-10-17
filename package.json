@@ -9,10 +9,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "start": "ts-node src/cli.ts",
+    "start": "node dist/apps/web/server.js",
+    "dev": "ts-node apps/web/server.ts",
     "test": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "web:serve": "ts-node apps/web/server.ts"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [],
   "author": "",
