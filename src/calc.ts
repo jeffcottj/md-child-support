@@ -8,6 +8,7 @@ import * as S from "./schema";
 import * as Schedule from "./schedule";
 import { totalAddOns, splitByShare, directPayTotalForParent, directPayConsistencyWarning } from "./addons";
 import { sharedStarter } from "./shared";
+import { multifamilyAllowance } from "./multifamily";
 
 type Advisory = "aboveTopOfSchedule" | "redirectedToWorksheetA" | null;
 
@@ -71,33 +72,6 @@ export function adjustedActualIncome(
  * take 75% of it, and multiply by the number of in-home children.  That number
  * becomes an allowed deduction before we compute their AAI.
  */
-export function multifamilyAllowance(
-  schedule: Schedule.Schedule,
-  parent: S.ParentIncome
-): number {
-  const count = parent.multifamilyChildrenInHome ?? 0;
-  if (count <= 0) {
-    return 0;
-  }
-
-  const lookup = Schedule.lookupBasicObligation(
-    schedule,
-    parent.actualMonthly,
-    1
-  );
-
-  let baseAmount = lookup.amount ?? null;
-  if (baseAmount == null) {
-    const column = schedule.byChildren?.["1"];
-    if (!column || column.length === 0) {
-      throw new Error("Schedule missing one-child column for multifamily allowance.");
-    }
-    baseAmount = column[column.length - 1];
-  }
-
-  return 0.75 * baseAmount * count;
-}
-
 /**
  * Performs the shared setup for both worksheets.
  *

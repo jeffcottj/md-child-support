@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "ts-node src/cli.ts",
     "test": "vitest",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "web:serve": "ts-node apps/web/server.ts"
   },
   "keywords": [],
   "author": "",
