@@ -35,4 +35,33 @@ describe("computeBasic (AAI → shares → basic lookup)", () => {
     expect(out.basicStatus).toBe("aboveTop");
     expect(out.basic).toBeNull();
   });
+
+  it("subtracts multifamily allowance before computing shares", () => {
+    const inputs: S.CaseInputs = {
+      numChildrenThisCase: 1,
+      custodyType: "PRIMARY",
+      overnightsParent1: 365,
+      parent1: {
+        actualMonthly: 1000,
+        preexistingSupportPaid: 0,
+        alimonyPaid: 0,
+        alimonyReceived: 0,
+        multifamilyChildrenInHome: 1,
+      },
+      parent2: {
+        actualMonthly: 1000,
+        preexistingSupportPaid: 0,
+        alimonyPaid: 0,
+        alimonyReceived: 0,
+        multifamilyChildrenInHome: 0,
+      },
+      addOns: { childcare: 0, healthInsurance: 0, extraordinaryMedical: 0, cashMedicalIVD: 0, additionalExpenses: 0 },
+    };
+
+    const out = computeBasic(inputs, Schedule.demoSchedule);
+    // Allowance: 0.75 × one-child basic at $1000 (100) = 75
+    expect(out.p1AAI).toBeCloseTo(925, 6);
+    expect(out.p2AAI).toBe(1000);
+    expect(out.p1Share).toBeCloseTo(925 / (925 + 1000), 6);
+  });
 });
