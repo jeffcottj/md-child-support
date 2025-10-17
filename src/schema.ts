@@ -123,6 +123,9 @@ export type CaseInputs = z.infer<typeof CaseInputs>;
  */
 export type CaseOutputs = {
   recommendedOrderParent1PaysParent2: number;
+  payor: "P1" | "P2" | null;
   worksheet: Record<string, number>;
   path: "WorksheetA" | "WorksheetB";
+  notes: string[];
+  advisory: "aboveTopOfSchedule" | "redirectedToWorksheetA" | null;
 };

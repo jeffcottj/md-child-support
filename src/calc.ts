@@ -2,19 +2,59 @@
 import * as S from "./schema";
 import * as Schedule from "./schedule";
 import { totalAddOns, splitByShare, directPayTotalForParent, directPayConsistencyWarning } from "./addons";
+import { sharedStarter } from "./shared";
+
+type Advisory = "aboveTopOfSchedule" | "redirectedToWorksheetA" | null;
 
 /**
  * Helper: compute Adjusted Actual Income (AAI) for one parent.
  * AAI = actualMonthly - preexistingSupportPaid - alimonyPaid + alimonyReceived
  * (Multifamily allowance is handled later when we wire add-ons/allowances.)
  */
-export function adjustedActualIncome(p: S.ParentIncome): number {
+export function adjustedActualIncome(
+  p: S.ParentIncome,
+  multifamilyAllowance = 0
+): number {
   return (
     p.actualMonthly -
     p.preexistingSupportPaid -
     p.alimonyPaid +
-    p.alimonyReceived
+    p.alimonyReceived -
+    multifamilyAllowance
   );
+}
+
+/**
+ * Multifamily allowance = 0.75 × (basic obligation for ONE child at the
+ * parent’s income) × number of other children residing in that parent’s home.
+ *
+ * The statute allows this deduction before computing Adjusted Actual Income.
+ */
+export function multifamilyAllowance(
+  schedule: Schedule.Schedule,
+  parent: S.ParentIncome
+): number {
+  const count = parent.multifamilyChildrenInHome ?? 0;
+  if (count <= 0) {
+    return 0;
+  }
+
+  const lookup = Schedule.lookupBasicObligation(
+    schedule,
+    parent.actualMonthly,
+    1
+  );
+
+  let baseAmount = lookup.amount ?? null;
+  if (baseAmount == null) {
+    const column = schedule.byChildren?.["1"];
+    if (!column || column.length === 0) {
+      throw new Error("Schedule missing one-child column for multifamily allowance.");
+    }
+    baseAmount = column[column.length - 1];
+  }
+
+  return 0.75 * baseAmount * count;
 }
 
 /**
@@ -35,8 +75,14 @@ export function computeBasic(
   // const v = (S.CaseInputs as any).parse ? (S.CaseInputs as any).parse(inputs) : inputs;
   const v = inputs;
 
-  const p1AAI = adjustedActualIncome(v.parent1);
-  const p2AAI = adjustedActualIncome(v.parent2);
+  const p1AAI = adjustedActualIncome(
+    v.parent1,
+    multifamilyAllowance(schedule, v.parent1)
+  );
+  const p2AAI = adjustedActualIncome(
+    v.parent2,
+    multifamilyAllowance(schedule, v.parent2)
+  );
   const combinedAAI = p1AAI + p2AAI;
 
   // Avoid divide-by-zero; if both AAIs are 0, split 50/50
@@ -180,5 +226,311 @@ export function computePrimaryFinal(
     line8_p2Recommended: p2Rec,
     line9_recommendedOrder: nonCustodialPays,
     note,
+  };
+}
+
+function overnightAdjustmentAmount(theoretical: number, overnights: number): number {
+  if (overnights >= 110) return 0;
+  if (overnights < 92) return theoretical;
+  const diff = 110 - overnights;
+  if (diff <= 0) return 0;
+  return theoretical * (diff / 18);
+}
+
+function determinePrimaryCustodianFromOvernights(overnightsP1: number): "P1" | "P2" {
+  const p1Pct = overnightsP1 / 365;
+  if (p1Pct > 0.5) return "P1";
+  if (p1Pct < 0.5) return "P2";
+  return "P1";
+}
+
+type SharedFinalResult =
+  | {
+      kind: "advisory";
+      advisory: "aboveTopOfSchedule";
+      worksheet: Record<string, number>;
+    }
+  | {
+      kind: "redirected";
+      primaryCustodian: "P1" | "P2";
+      primaryResult: ReturnType<typeof computePrimaryFinal>;
+      note: string;
+    }
+  | {
+      kind: "computed";
+      advisory: null;
+      payor: "P1" | "P2" | null;
+      recommended: number;
+      note: string | null;
+      worksheet: Record<string, number>;
+      capApplied: null | { before: number; after: number; primary: number | null };
+    };
+
+export function computeSharedFinal(
+  inputs: S.CaseInputs,
+  schedule: Schedule.Schedule
+): SharedFinalResult {
+  if (inputs.custodyType !== "SHARED") {
+    throw new Error('computeSharedFinal expects custodyType "SHARED"');
+  }
+
+  const starter = sharedStarter(inputs, schedule, computeBasic);
+
+  if (starter.advisory === "aboveTopOfSchedule") {
+    return {
+      kind: "advisory",
+      advisory: "aboveTopOfSchedule",
+      worksheet: {
+        line2_p1AAI: starter.p1AAI,
+        line2_p2AAI: starter.p2AAI,
+        line3_p1Share: starter.p1Share,
+        line3_p2Share: starter.p2Share,
+      },
+    };
+  }
+
+  if (starter.redirectToWorksheetA) {
+    const primaryCustodian = determinePrimaryCustodianFromOvernights(
+      starter.overnightsP1
+    );
+    const primaryInputs: S.CaseInputs = {
+      ...inputs,
+      custodyType: "PRIMARY",
+      primaryCustodian,
+    };
+    const primaryResult = computePrimaryFinal(primaryInputs, schedule);
+    const note = `Shared custody threshold not met; redirected to Worksheet A using ${primaryCustodian} as primary custodian.`;
+    return {
+      kind: "redirected",
+      primaryCustodian,
+      primaryResult,
+      note,
+    };
+  }
+
+  const adjustedBasic = starter.adjustedBasic ?? 0;
+  const p1Share = starter.p1Share;
+  const p2Share = starter.p2Share;
+  const pctP1 = starter.overnightPctP1 ?? 0;
+  const pctP2 = starter.overnightPctP2 ?? 0;
+
+  const line8_p1 = adjustedBasic * p1Share;
+  const line8_p2 = adjustedBasic * p2Share;
+
+  const line9_p1 = line8_p1 * pctP2;
+  const line9_p2 = line8_p2 * pctP1;
+
+  const p1Overnights = starter.overnightsP1;
+  const p2Overnights = 365 - p1Overnights;
+
+  const line10_p1 = overnightAdjustmentAmount(line9_p1, p1Overnights);
+  const line10_p2 = overnightAdjustmentAmount(line9_p2, p2Overnights);
+
+  const line11_p1 = Math.max(0, line9_p1 - line10_p1);
+  const line11_p2 = Math.max(0, line9_p2 - line10_p2);
+
+  const addOnsTotal = totalAddOns(inputs.addOns);
+  const addOnShares = splitByShare(addOnsTotal, p1Share);
+
+  const line14_p1 = line11_p1 + addOnShares.p1;
+  const line14_p2 = line11_p2 + addOnShares.p2;
+
+  const p1Direct = directPayTotalForParent(inputs.directPay.parent1);
+  const p2Direct = directPayTotalForParent(inputs.directPay.parent2);
+
+  const note = directPayConsistencyWarning(addOnsTotal, p1Direct, p2Direct);
+
+  const line15_p1 = Math.max(0, line14_p1 - p1Direct);
+  const line15_p2 = Math.max(0, line14_p2 - p2Direct);
+
+  const diff = line15_p1 - line15_p2;
+  let payor: "P1" | "P2" | null = null;
+  let recommended = 0;
+  if (Math.abs(diff) > 1e-6) {
+    if (diff > 0) {
+      payor = "P1";
+      recommended = diff;
+    } else {
+      payor = "P2";
+      recommended = -diff;
+    }
+  }
+
+  const beforeCap = recommended;
+  let capApplied: null | { before: number; after: number; primary: number | null } = null;
+  if (payor) {
+    const primaryCustodian = payor === "P1" ? "P2" : "P1";
+    const primaryInputs: S.CaseInputs = {
+      ...inputs,
+      custodyType: "PRIMARY",
+      primaryCustodian,
+    };
+    const primaryResult = computePrimaryFinal(primaryInputs, schedule);
+    const primaryAmount = primaryResult.line9_recommendedOrder ?? null;
+    if (typeof primaryAmount === "number") {
+      const capped = Math.min(recommended, primaryAmount);
+      capApplied = { before: beforeCap, after: capped, primary: primaryAmount };
+      recommended = capped;
+    }
+  }
+
+  const worksheet: Record<string, number> = {
+    line2_p1AAI: starter.p1AAI,
+    line2_p2AAI: starter.p2AAI,
+    line3_p1Share: p1Share,
+    line3_p2Share: p2Share,
+    line4_basic: starter.basic ?? 0,
+    line5_adjustedBasic: adjustedBasic,
+    line6_overnightsP1: p1Overnights,
+    line6_overnightsP2: p2Overnights,
+    line7_pctP1: pctP1,
+    line7_pctP2: pctP2,
+    line8_p1ShareAdjustedBasic: line8_p1,
+    line8_p2ShareAdjustedBasic: line8_p2,
+    line9_p1Theoretical: line9_p1,
+    line9_p2Theoretical: line9_p2,
+    line10_p1Adjustment: line10_p1,
+    line10_p2Adjustment: line10_p2,
+    line11_p1AfterAdjustment: line11_p1,
+    line11_p2AfterAdjustment: line11_p2,
+    line13_totalAddOns: addOnsTotal,
+    line13_p1Share: addOnShares.p1,
+    line13_p2Share: addOnShares.p2,
+    line14_p1Total: line14_p1,
+    line14_p2Total: line14_p2,
+    line15_p1DirectPay: p1Direct,
+    line15_p2DirectPay: p2Direct,
+    line15_p1Recommended: line15_p1,
+    line15_p2Recommended: line15_p2,
+    line16_beforeCap: payor ? beforeCap : 0,
+  };
+
+  return {
+    kind: "computed",
+    advisory: null,
+    note,
+    payor,
+    recommended,
+    capApplied,
+    worksheet,
+  };
+}
+
+export function calculateCase(
+  inputs: S.CaseInputs,
+  schedule: Schedule.Schedule
+): S.CaseOutputs {
+  const notes: string[] = [];
+
+  if (inputs.custodyType === "PRIMARY") {
+    const result = computePrimaryFinal(inputs, schedule);
+    if (result.note) notes.push(result.note);
+    const payor = result.advisory === "aboveTopOfSchedule"
+      ? null
+      : inputs.primaryCustodian === "P1" ? "P2" : "P1";
+    const amount = result.line9_recommendedOrder ?? 0;
+    const oriented = payor === "P1" ? amount : payor === "P2" ? -amount : 0;
+    const worksheet: Record<string, number> = {};
+    const assign = (key: string, value: number | null | undefined) => {
+      if (typeof value === "number") {
+        worksheet[key] = value;
+      }
+    };
+    assign("line2_p1AAI", result.p1AAI);
+    assign("line2_p2AAI", result.p2AAI);
+    assign("line3_p1Share", result.p1Share);
+    assign("line3_p2Share", result.p2Share);
+    assign("line4_basic", result.basic ?? null);
+    assign("line5_totalObligation", result.totalObligation ?? null);
+    assign("line6_p1Obligation", result.p1Obligation ?? null);
+    assign("line6_p2Obligation", result.p2Obligation ?? null);
+    assign("line7_p1DirectPay", result.line7_p1DirectPay ?? null);
+    assign("line7_p2DirectPay", result.line7_p2DirectPay ?? null);
+    assign("line8_p1Recommended", result.line8_p1Recommended ?? null);
+    assign("line8_p2Recommended", result.line8_p2Recommended ?? null);
+    assign("line9_recommendedOrder", result.line9_recommendedOrder ?? null);
+
+    return {
+      recommendedOrderParent1PaysParent2: oriented,
+      payor,
+      path: "WorksheetA",
+      worksheet,
+      notes,
+      advisory: result.advisory,
+    };
+  }
+
+  const sharedResult = computeSharedFinal(inputs, schedule);
+
+  if (sharedResult.kind === "redirected") {
+    notes.push(sharedResult.note);
+    const primary = sharedResult.primaryResult;
+    if (primary.note) notes.push(primary.note);
+    const payor = primary.advisory === "aboveTopOfSchedule"
+      ? null
+      : sharedResult.primaryCustodian === "P1" ? "P2" : "P1";
+    const amount = primary.line9_recommendedOrder ?? 0;
+    const oriented = payor === "P1" ? amount : payor === "P2" ? -amount : 0;
+    const worksheet: Record<string, number> = {};
+    const assign = (key: string, value: number | null | undefined) => {
+      if (typeof value === "number") worksheet[key] = value;
+    };
+    assign("line2_p1AAI", primary.p1AAI);
+    assign("line2_p2AAI", primary.p2AAI);
+    assign("line3_p1Share", primary.p1Share);
+    assign("line3_p2Share", primary.p2Share);
+    assign("line4_basic", primary.basic ?? null);
+    assign("line5_totalObligation", primary.totalObligation ?? null);
+    assign("line6_p1Obligation", primary.p1Obligation ?? null);
+    assign("line6_p2Obligation", primary.p2Obligation ?? null);
+    assign("line7_p1DirectPay", primary.line7_p1DirectPay ?? null);
+    assign("line7_p2DirectPay", primary.line7_p2DirectPay ?? null);
+    assign("line8_p1Recommended", primary.line8_p1Recommended ?? null);
+    assign("line8_p2Recommended", primary.line8_p2Recommended ?? null);
+    assign("line9_recommendedOrder", primary.line9_recommendedOrder ?? null);
+
+    return {
+      recommendedOrderParent1PaysParent2: oriented,
+      payor,
+      path: "WorksheetA",
+      worksheet,
+      notes,
+      advisory: "redirectedToWorksheetA",
+    };
+  }
+
+  if (sharedResult.kind === "advisory") {
+    return {
+      recommendedOrderParent1PaysParent2: 0,
+      payor: null,
+      path: "WorksheetB",
+      worksheet: sharedResult.worksheet,
+      notes,
+      advisory: sharedResult.advisory,
+    };
+  }
+
+  const shared = sharedResult;
+  if (shared.note) notes.push(shared.note);
+  if (shared.capApplied && shared.capApplied.primary != null && Math.abs(shared.capApplied.before - shared.capApplied.after) > 1e-6) {
+    notes.push(
+      `Shared result capped at ${shared.capApplied.primary?.toFixed(2)} (primary custody equivalent).`
+    );
+    shared.worksheet.line16_cappedAmount = shared.capApplied.after;
+  }
+
+  const oriented = shared.payor === "P1"
+    ? shared.recommended
+    : shared.payor === "P2"
+      ? -shared.recommended
+      : 0;
+
+  return {
+    recommendedOrderParent1PaysParent2: oriented,
+    payor: shared.payor,
+    path: "WorksheetB",
+    worksheet: shared.worksheet,
+    notes,
+    advisory: shared.advisory,
   };
 }
