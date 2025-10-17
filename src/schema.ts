@@ -1,6 +1,14 @@
-// src/schema.ts
+/**
+ * Input and output shapes for the calculator.  These Zod schemas describe the
+ * pieces of information the worksheets expect, but the comments are written in
+ * everyday language so a non-programmer can read them as a checklist.
+ */
 import { z } from "zod";
 
+/**
+ * Breakdown of a parent's direct payments to third parties.  Each field is the
+ * monthly amount that parent pays straight to a provider.
+ */
 export const DirectPayAddOns = z.object({
   childcare: z.number().nonnegative().default(0),
   healthInsurance: z.number().nonnegative().default(0),
@@ -19,6 +27,10 @@ const ZERO_DIRECT_PAY_ADDONS: DirectPayAddOns = {
   additionalExpenses: 0,
 };
 
+/**
+ * Pair of direct-pay add-on sets, one for each parent.  Defaults to zero so we
+ * can skip the section when no direct payments exist.
+ */
 export const DirectPay = z.object({
   parent1: DirectPayAddOns.default(ZERO_DIRECT_PAY_ADDONS),
   parent2: DirectPayAddOns.default(ZERO_DIRECT_PAY_ADDONS),
@@ -26,25 +38,15 @@ export const DirectPay = z.object({
 export type DirectPay = z.infer<typeof DirectPay>;
 
 /**
- * Custody type corresponds to which worksheet we run:
- * - PRIMARY  → Worksheet A (sole/primary physical custody)
- * - SHARED   → Worksheet B (shared physical custody)
+ * Plain-language choice between Worksheet A (primary custody) and Worksheet B
+ * (shared custody).
  */
 export const CustodyType = z.enum(["PRIMARY", "SHARED"]);
 export type CustodyType = z.infer<typeof CustodyType>;
 
 /**
- * ParentIncome captures the line 1 adjustments that produce line 2 (AAI).
- * We keep everything MONTHLY, because the court forms are monthly.
- *
- * Mappings (Worksheet A/B):
- * - Actual Monthly Income:               line 1
- * - Preexisting child support PAID:      line 1a (subtract)
- * - Alimony PAID in any case:            line 1b (subtract)
- * - Alimony RECEIVED in THIS case:       line 1c (add)
- * - Multifamily allowance (for in-home children not in this case) appears
- *   on the form as a helper area. We capture the *count* and will compute
- *   the allowance in the calculator (0.75 × basic for each such child).
+ * Captures the income-related lines from the worksheets for one parent.  Every
+ * amount is monthly to match the court forms.
  */
 export const ParentIncome = z.object({
   actualMonthly: z.number().nonnegative(),            // line 1
@@ -56,15 +58,8 @@ export const ParentIncome = z.object({
 export type ParentIncome = z.infer<typeof ParentIncome>;
 
 /**
- * Add-ons appear the same on A and B:
- * - Childcare (a)
- * - Child’s health insurance cost (b)
- * - Extraordinary medical (c)
- * - Cash medical (IV-D only) (d)
- * - Additional expenses (e) e.g., special/private school, transportation
- *
- * We record the TOTAL amounts (monthly). Allocation by income share happens
- * in the calculator step, not here.
+ * Total monthly add-on expenses for the case.  Later we split these by income
+ * share; here we simply record the combined amounts.
  */
 export const AddOns = z.object({
   childcare: z.number().nonnegative().default(0),
@@ -76,15 +71,11 @@ export const AddOns = z.object({
 export type AddOns = z.infer<typeof AddOns>;
 
 /**
- * CaseInputs is what one calculation run needs.
- * - numChildrenThisCase: matches the row you’ll pick in the schedule table
- * - custodyType: which worksheet math to run
- * - overnightsParent1: only used for SHARED; must be 0..365
- * - parent1/parent2: each parent’s income inputs
- * - addOns: total monthly add-ons for this case
+ * The full set of answers we need from a user to calculate support.
  *
- * NOTE on overnights: we only store Parent1’s; Parent2’s is 365 - p1.
- * This keeps inputs minimal and prevents “sum isn’t 365” conflicts.
+ * It asks for the number of children, the custody style, Parent 1's
+ * overnights, both parents' income details, the add-on totals, who is the
+ * primary custodian, and any direct payments already being made.
  */
 export const CaseInputs = z.object({
   numChildrenThisCase: z.number().int().min(1),
@@ -113,13 +104,9 @@ export const CaseInputs = z.object({
 export type CaseInputs = z.infer<typeof CaseInputs>;
 
 /**
- * CaseOutputs is intentionally small:
- * - recommendedOrderParent1PaysParent2: the final monthly amount (>= 0)
- * - worksheet: a bag of intermediate line items (for transparency, testing, and PDF rendering)
- * - path: which worksheet logic produced the result ("WorksheetA" | "WorksheetB")
- *
- * We'll populate `worksheet` with keys that mirror the line numbers later
- * (e.g., basic, adjustedBasic, p1AAI, p2AAI, p1Share, p2Share, etc.).
+ * Simplified output returned to the caller after we run the calculator.  It
+ * includes who pays, how much, the worksheet line items for transparency, and
+ * any advisory notes that a court might want to review.
  */
 export type CaseOutputs = {
   recommendedOrderParent1PaysParent2: number;
