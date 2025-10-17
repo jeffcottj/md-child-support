@@ -372,7 +372,8 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
 }
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+const host = process.env.HOST || "0.0.0.0";
 
-http.createServer(handleRequest).listen(port, () => {
-  console.log(`Child support calculator running on http://localhost:${port}`);
+http.createServer(handleRequest).listen(port, host, () => {
+  console.log(`Child support calculator running on http://${host}:${port}`);
 });

@@ -8,7 +8,9 @@
     "skipLibCheck": true,
     "types": ["node"],
     "verbatimModuleSyntax": false,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "outDir": "dist",
+    "allowSyntheticDefaultImports": true
   },
   "include": ["src", "tests"],
   "exclude": ["dist", "node_modules"]
