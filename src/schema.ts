@@ -1,6 +1,30 @@
 // src/schema.ts
 import { z } from "zod";
 
+export const DirectPayAddOns = z.object({
+  childcare: z.number().nonnegative().default(0),
+  healthInsurance: z.number().nonnegative().default(0),
+  extraordinaryMedical: z.number().nonnegative().default(0),
+  cashMedicalIVD: z.number().nonnegative().default(0),
+  additionalExpenses: z.number().nonnegative().default(0),
+});
+export type DirectPayAddOns = z.infer<typeof DirectPayAddOns>;
+
+// A fully-zero default that satisfies DirectPayAddOns
+const ZERO_DIRECT_PAY_ADDONS: DirectPayAddOns = {
+  childcare: 0,
+  healthInsurance: 0,
+  extraordinaryMedical: 0,
+  cashMedicalIVD: 0,
+  additionalExpenses: 0,
+};
+
+export const DirectPay = z.object({
+  parent1: DirectPayAddOns.default(ZERO_DIRECT_PAY_ADDONS),
+  parent2: DirectPayAddOns.default(ZERO_DIRECT_PAY_ADDONS),
+});
+export type DirectPay = z.infer<typeof DirectPay>;
+
 /**
  * Custody type corresponds to which worksheet we run:
  * - PRIMARY  → Worksheet A (sole/primary physical custody)
@@ -69,8 +93,13 @@ export const CaseInputs = z.object({
   parent1: ParentIncome,
   parent2: ParentIncome,
   addOns: AddOns,
+
+  primaryCustodian: z.enum(["P1", "P2"]).default("P1"),
+  directPay: DirectPay.default({
+    parent1: ZERO_DIRECT_PAY_ADDONS,
+    parent2: ZERO_DIRECT_PAY_ADDONS,
+  }),
 }).superRefine((v, ctx) => {
-  // For SHARED custody we require overnights in range 0..365 (already constrained by .min/.max)
   if (v.custodyType === "SHARED") {
     if (v.overnightsParent1 < 0 || v.overnightsParent1 > 365) {
       ctx.addIssue({

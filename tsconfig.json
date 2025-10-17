@@ -3,8 +3,6 @@
     "target": "ES2020",
     "module": "CommonJS",
     "moduleResolution": "Node",
-    "rootDir": "src",
-    "outDir": "dist",
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
@@ -12,5 +10,6 @@
     "verbatimModuleSyntax": false,
     "resolveJsonModule": true
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  "exclude": ["dist", "node_modules"]
 }

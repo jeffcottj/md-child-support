@@ -1,7 +1,7 @@
 // src/calc.ts
 import * as S from "./schema";
 import * as Schedule from "./schedule";
-import { totalAddOns, splitByShare } from "./addons";
+import { totalAddOns, splitByShare, directPayTotalForParent, directPayConsistencyWarning } from "./addons";
 
 /**
  * Helper: compute Adjusted Actual Income (AAI) for one parent.
@@ -124,5 +124,61 @@ export function computePrimaryTotals(
     totalObligation,                       // Worksheet A line 5 = basic + add-ons
     p1Obligation: p1,                      // Worksheet A line 6 (parent 1)
     p2Obligation: p2,                      // Worksheet A line 6 (parent 2)
+  };
+}
+
+/**
+ * Worksheet A lines 7–9:
+ * - line 7 (direct pay per parent)
+ * - line 8 (recommended amount per parent) = line 6 - line 7 (min 0)
+ * - line 9 (recommended order) = non-custodial parent's line 8
+ */
+export function computePrimaryFinal(
+  inputs: S.CaseInputs,
+  schedule: Schedule.Schedule
+) {
+  if (inputs.custodyType !== "PRIMARY") {
+    throw new Error('computePrimaryFinal expects custodyType "PRIMARY"');
+  }
+
+  // Build on Step 6 results (line 2,3,4,5,6 already computed)
+  const t = computePrimaryTotals(inputs, schedule);
+
+  if (t.advisory === "aboveTopOfSchedule") {
+    // Still discretionary; pass through with advisory
+    return {
+      ...t,
+      line7_p1DirectPay: null as number | null,
+      line7_p2DirectPay: null as number | null,
+      line8_p1Recommended: null as number | null,
+      line8_p2Recommended: null as number | null,
+      line9_recommendedOrder: null as number | null,
+      note: "Above top of schedule; court discretion.",
+    };
+  }
+
+  // Line 7: direct pay per parent
+  const p1Direct = directPayTotalForParent(inputs.directPay.parent1);
+  const p2Direct = directPayTotalForParent(inputs.directPay.parent2);
+
+  // Optional soft warning if the direct-pay sum differs widely from addOnsTotal
+  const note = directPayConsistencyWarning(t.addOnsTotal!, p1Direct, p2Direct);
+
+  // Line 8: recommended per parent (never below zero)
+  const p1Rec = Math.max(0, (t.p1Obligation ?? 0) - p1Direct);
+  const p2Rec = Math.max(0, (t.p2Obligation ?? 0) - p2Direct);
+
+  // Line 9: bring down the non-custodial parent's amount
+  const nonCustodialPays =
+    inputs.primaryCustodian === "P1" ? p2Rec : p1Rec;
+
+  return {
+    ...t,
+    line7_p1DirectPay: p1Direct,
+    line7_p2DirectPay: p2Direct,
+    line8_p1Recommended: p1Rec,
+    line8_p2Recommended: p2Rec,
+    line9_recommendedOrder: nonCustodialPays,
+    note,
   };
 }
