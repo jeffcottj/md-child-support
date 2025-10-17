@@ -80,14 +80,44 @@ The spec below drives implementation and testing.
 ---
 
 ## Edge Rules
-- **Between schedule rows**: pick the **next higher**.  
-- **Above top of schedule**: mark **“discretionary”**.  
-- **Shared threshold**: if <25% overnights, fall back to Worksheet A.  
+- **Between schedule rows**: pick the **next higher**.
+- **Above top of schedule**: mark **“discretionary”**.
+- **Shared threshold**: if <25% overnights, fall back to Worksheet A.
 - **92–109 overnights**: apply statutory adjustment to that parent’s theoretical.
 
 ---
 
+## Developer Quick Start
+
+### Install & verify
+
+```
+npm install
+npm run typecheck
+npm test
+```
+
+### Command-line sample
+
+```
+npm start
+```
+
+The CLI prints a worksheet summary for the built-in demonstration case. Adjust the numbers inside `src/cli.ts` to explore other scenarios.
+
+### Web interface
+
+Run the minimal UI server and visit the printed URL (defaults to [http://localhost:3000](http://localhost:3000)).
+
+```
+npm run web:serve
+```
+
+The page accepts every field required by Worksheets A and B and renders the calculation, worksheet lines, advisories, and notes.
+
+---
+
 ## Source Documents (store in `/docs`)
-- CC-DR-034 Worksheet A (Primary Custody)  
-- CC-DR-035 Worksheet B (Shared Custody)  
+- CC-DR-034 Worksheet A (Primary Custody)
+- CC-DR-035 Worksheet B (Shared Custody)
 - Maryland Family Law §§ 12-201 to 12-204 (statutes)
