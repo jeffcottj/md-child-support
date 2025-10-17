@@ -1,9 +1,15 @@
-// src/cli.ts (temp demo)
+/**
+ * A tiny demonstration command-line script that runs the calculator with a
+ * hard-coded example.  It is meant for curious readers or testers who want to
+ * see sample numbers without building a user interface yet.
+ */
 import * as S from "./schema";
 import * as Schedule from "./schedule";
 import { computeBasic } from "./calc";
 import { sharedStarter } from "./shared";
 
+// Example scenario mirroring Worksheet B inputs.  Feel free to modify the
+// numbers while experimenting from the terminal.
 const sample: S.CaseInputs = {
   numChildrenThisCase: 2,
   custodyType: "SHARED",

@@ -1,4 +1,9 @@
-// src/calc.ts
+/**
+ * Core calculator logic for the Maryland child-support worksheets.  Every
+ * function here mirrors a recognizable step on Worksheet A or Worksheet B and
+ * is documented in plain language so attorneys, self-represented litigants, and
+ * developers can all follow along.
+ */
 import * as S from "./schema";
 import * as Schedule from "./schedule";
 import { totalAddOns, splitByShare, directPayTotalForParent, directPayConsistencyWarning } from "./addons";
@@ -7,9 +12,43 @@ import { sharedStarter } from "./shared";
 type Advisory = "aboveTopOfSchedule" | "redirectedToWorksheetA" | null;
 
 /**
- * Helper: compute Adjusted Actual Income (AAI) for one parent.
- * AAI = actualMonthly - preexistingSupportPaid - alimonyPaid + alimonyReceived
- * (Multifamily allowance is handled later when we wire add-ons/allowances.)
+ * Shared structure returned by the Worksheet A helper that stops at line 6.
+ */
+type PrimaryTotalsResult = {
+  path: "WorksheetA";
+  advisory: null | "aboveTopOfSchedule";
+  basic: number | null;
+  usedRowIncome: number | null;
+  p1AAI: number;
+  p2AAI: number;
+  combinedAAI: number;
+  p1Share: number;
+  p2Share: number;
+  addOnsTotal: number;
+  totalObligation: number | null;
+  p1Obligation: number | null;
+  p2Obligation: number | null;
+};
+
+/**
+ * Full Worksheet A result including direct payments and recommended order.
+ */
+type PrimaryFinalResult = PrimaryTotalsResult & {
+  line7_p1DirectPay: number | null;
+  line7_p2DirectPay: number | null;
+  line8_p1Recommended: number | null;
+  line8_p2Recommended: number | null;
+  line9_recommendedOrder: number | null;
+  note: string | null;
+};
+
+/**
+ * Calculates a parent's Adjusted Actual Income (AAI).
+ *
+ * Start with the parent's monthly income and subtract what the law allows:
+ * existing support paid for other cases, alimony they pay, and any approved
+ * multifamily allowance.  Then add back any alimony they receive in this case.
+ * The result is the number shown on line 2 of the worksheets.
  */
 export function adjustedActualIncome(
   p: S.ParentIncome,
@@ -25,10 +64,12 @@ export function adjustedActualIncome(
 }
 
 /**
- * Multifamily allowance = 0.75 × (basic obligation for ONE child at the
- * parent’s income) × number of other children residing in that parent’s home.
+ * Computes the multifamily allowance for a parent who supports additional
+ * children in their own household.
  *
- * The statute allows this deduction before computing Adjusted Actual Income.
+ * We look up the basic support for one child using only that parent's income,
+ * take 75% of it, and multiply by the number of in-home children.  That number
+ * becomes an allowed deduction before we compute their AAI.
  */
 export function multifamilyAllowance(
   schedule: Schedule.Schedule,
@@ -58,14 +99,12 @@ export function multifamilyAllowance(
 }
 
 /**
- * The minimal "compute" step:
- * - Validates inputs (optionally, see note)
- * - Computes AAI per parent and combined
- * - Computes each parent's income share
- * - Looks up the "basic obligation" from the schedule
+ * Performs the shared setup for both worksheets.
  *
- * For now we return a partial worksheet bag with a few line items
- * so you can verify the numbers by eye.
+ * The function calculates each parent's AAI (including multifamily
+ * adjustments), sums them, figures out the income percentages, and consults the
+ * statewide schedule to find the basic support obligation.  The returned
+ * object mirrors the first few lines of the official worksheets.
  */
 export function computeBasic(
   inputs: S.CaseInputs,
@@ -113,17 +152,16 @@ export function computeBasic(
 }
 
 /**
- * Primary (Worksheet A) slice:
- * - Requires a valid "basic" (not aboveTop).
- * - totalObligation = basic + addOnsTotal
- * - each parent's obligation = totalObligation × income share
+ * Works through Worksheet A up to line 6.
  *
- * NOTE: We are NOT subtracting "direct pay" yet (that’s a later step).
+ * Once we have the basic obligation we add the reported add-ons, then divide
+ * the total by the parents' income percentages.  If the schedule says we are
+ * above the published table we stop and mark the result as discretionary.
  */
 export function computePrimaryTotals(
   inputs: S.CaseInputs,
   schedule: Schedule.Schedule
-) {
+): PrimaryTotalsResult {
   if (inputs.custodyType !== "PRIMARY") {
     throw new Error('computePrimaryTotals expects custodyType "PRIMARY"');
   }
@@ -174,15 +212,17 @@ export function computePrimaryTotals(
 }
 
 /**
- * Worksheet A lines 7–9:
- * - line 7 (direct pay per parent)
- * - line 8 (recommended amount per parent) = line 6 - line 7 (min 0)
- * - line 9 (recommended order) = non-custodial parent's line 8
+ * Completes Worksheet A by applying direct payments and naming the payor.
+ *
+ * The function subtracts each parent's direct payments (line 7) from their
+ * share (line 6), never dropping below zero, and then selects the amount owed
+ * by the non-custodial parent (line 9).  We also keep an optional note if the
+ * direct payments do not match the declared add-ons.
  */
 export function computePrimaryFinal(
   inputs: S.CaseInputs,
   schedule: Schedule.Schedule
-) {
+): PrimaryFinalResult {
   if (inputs.custodyType !== "PRIMARY") {
     throw new Error('computePrimaryFinal expects custodyType "PRIMARY"');
   }
@@ -229,6 +269,14 @@ export function computePrimaryFinal(
   };
 }
 
+/**
+ * Calculates the Worksheet B 92–109 overnight adjustment for one parent.
+ *
+ * The law gradually reduces the theoretical obligation when a parent keeps the
+ * child between 92 and 109 nights.  Below 92 nights the parent pays the full
+ * theoretical amount; at 110 nights or more there is no reduction because the
+ * case would not have been redirected to Worksheet A.
+ */
 function overnightAdjustmentAmount(theoretical: number, overnights: number): number {
   if (overnights >= 110) return 0;
   if (overnights < 92) return theoretical;
@@ -237,6 +285,14 @@ function overnightAdjustmentAmount(theoretical: number, overnights: number): num
   return theoretical * (diff / 18);
 }
 
+/**
+ * Chooses which parent should be treated as the primary custodian when a
+ * shared case gets redirected to Worksheet A.
+ *
+ * We simply compare the number of nights: the parent with more nights becomes
+ * the primary custodian.  On a perfect tie we default to Parent 1 to avoid
+ * uncertainty.
+ */
 function determinePrimaryCustodianFromOvernights(overnightsP1: number): "P1" | "P2" {
   const p1Pct = overnightsP1 / 365;
   if (p1Pct > 0.5) return "P1";
@@ -244,6 +300,11 @@ function determinePrimaryCustodianFromOvernights(overnightsP1: number): "P1" | "
   return "P1";
 }
 
+/**
+ * Possible outcomes when running the shared-custody calculator.  It keeps the
+ * branching logic easy to read: advisory when above the schedule, redirected
+ * when Worksheet A should be used, or computed when we have a full answer.
+ */
 type SharedFinalResult =
   | {
       kind: "advisory";
@@ -266,6 +327,15 @@ type SharedFinalResult =
       capApplied: null | { before: number; after: number; primary: number | null };
     };
 
+/**
+ * Carries Worksheet B from start to finish, including caps and redirects.
+ *
+ * Depending on the situation this function may:
+ * - announce that the case is above the schedule,
+ * - redirect to Worksheet A when the shared threshold fails, or
+ * - produce the full Worksheet B results, including the statutory cap that
+ *   prevents shared support from exceeding the primary amount.
+ */
 export function computeSharedFinal(
   inputs: S.CaseInputs,
   schedule: Schedule.Schedule
@@ -277,6 +347,9 @@ export function computeSharedFinal(
   const starter = sharedStarter(inputs, schedule, computeBasic);
 
   if (starter.advisory === "aboveTopOfSchedule") {
+    // The combined income exceeds the published table, so we report that the
+    // amount is discretionary and include the preliminary worksheet numbers for
+    // transparency.
     return {
       kind: "advisory",
       advisory: "aboveTopOfSchedule",
@@ -290,6 +363,9 @@ export function computeSharedFinal(
   }
 
   if (starter.redirectToWorksheetA) {
+    // One parent dipped below the 25% overnight threshold.  Maryland requires
+    // us to fall back to Worksheet A, so we pick the parent with more nights as
+    // the primary custodian and reuse the Worksheet A calculator.
     const primaryCustodian = determinePrimaryCustodianFromOvernights(
       starter.overnightsP1
     );
@@ -314,6 +390,8 @@ export function computeSharedFinal(
   const pctP1 = starter.overnightPctP1 ?? 0;
   const pctP2 = starter.overnightPctP2 ?? 0;
 
+  // Lines 8–9: each parent owes their share of the adjusted basic for the time
+  // the child is with the other parent.
   const line8_p1 = adjustedBasic * p1Share;
   const line8_p2 = adjustedBasic * p2Share;
 
@@ -323,18 +401,22 @@ export function computeSharedFinal(
   const p1Overnights = starter.overnightsP1;
   const p2Overnights = 365 - p1Overnights;
 
+  // Lines 10–11: apply the 92–109 overnight adjustment and ensure the values
+  // never become negative.
   const line10_p1 = overnightAdjustmentAmount(line9_p1, p1Overnights);
   const line10_p2 = overnightAdjustmentAmount(line9_p2, p2Overnights);
 
   const line11_p1 = Math.max(0, line9_p1 - line10_p1);
   const line11_p2 = Math.max(0, line9_p2 - line10_p2);
 
+  // Line 13: divide the add-ons by income share.
   const addOnsTotal = totalAddOns(inputs.addOns);
   const addOnShares = splitByShare(addOnsTotal, p1Share);
 
   const line14_p1 = line11_p1 + addOnShares.p1;
   const line14_p2 = line11_p2 + addOnShares.p2;
 
+  // Line 15: subtract direct payments that the parents already make.
   const p1Direct = directPayTotalForParent(inputs.directPay.parent1);
   const p2Direct = directPayTotalForParent(inputs.directPay.parent2);
 
@@ -347,6 +429,8 @@ export function computeSharedFinal(
   let payor: "P1" | "P2" | null = null;
   let recommended = 0;
   if (Math.abs(diff) > 1e-6) {
+    // A positive difference means Parent 1 owes Parent 2; negative means the
+    // opposite.  We record the payor and the absolute amount owed.
     if (diff > 0) {
       payor = "P1";
       recommended = diff;
@@ -359,6 +443,9 @@ export function computeSharedFinal(
   const beforeCap = recommended;
   let capApplied: null | { before: number; after: number; primary: number | null } = null;
   if (payor) {
+    // Maryland caps Worksheet B at the comparable Worksheet A amount.  We rerun
+    // the primary calculator with the non-payor as the primary custodian and
+    // trim the shared result if needed.
     const primaryCustodian = payor === "P1" ? "P2" : "P1";
     const primaryInputs: S.CaseInputs = {
       ...inputs,
@@ -416,6 +503,13 @@ export function computeSharedFinal(
   };
 }
 
+/**
+ * User-friendly wrapper that accepts case inputs and returns the final order.
+ *
+ * This is the primary function external callers will use.  It decides which
+ * worksheet to run, collects a tidy "worksheet" bag of numbers for display, and
+ * records any notes or advisories for the user.
+ */
 export function calculateCase(
   inputs: S.CaseInputs,
   schedule: Schedule.Schedule
@@ -423,6 +517,7 @@ export function calculateCase(
   const notes: string[] = [];
 
   if (inputs.custodyType === "PRIMARY") {
+    // Run Worksheet A to completion and collect the intermediate values.
     const result = computePrimaryFinal(inputs, schedule);
     if (result.note) notes.push(result.note);
     const payor = result.advisory === "aboveTopOfSchedule"
@@ -463,6 +558,8 @@ export function calculateCase(
   const sharedResult = computeSharedFinal(inputs, schedule);
 
   if (sharedResult.kind === "redirected") {
+    // Shared inputs did not meet the threshold, so fall back to Worksheet A and
+    // explain the redirect in the notes.
     notes.push(sharedResult.note);
     const primary = sharedResult.primaryResult;
     if (primary.note) notes.push(primary.note);
@@ -500,6 +597,7 @@ export function calculateCase(
   }
 
   if (sharedResult.kind === "advisory") {
+    // Income exceeded the table; return an advisory-only result.
     return {
       recommendedOrderParent1PaysParent2: 0,
       payor: null,
@@ -519,6 +617,7 @@ export function calculateCase(
     shared.worksheet.line16_cappedAmount = shared.capApplied.after;
   }
 
+  // Positive values mean Parent 1 pays Parent 2; negative values reverse it.
   const oriented = shared.payor === "P1"
     ? shared.recommended
     : shared.payor === "P2"

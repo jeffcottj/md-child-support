@@ -1,13 +1,28 @@
-// src/shared.ts
+/**
+ * Shared-custody helpers.  These functions translate the Maryland Worksheet B
+ * instructions into plain, step-by-step math so we can reuse them in the main
+ * calculator.
+ */
 import * as S from "./schema";
 import * as Schedule from "./schedule";
 
-/** 1.5x “Adjusted Basic” per Maryland’s shared-custody rule. */
+/**
+ * Multiplies the "basic" obligation by 1.5, matching the shared-custody rule
+ * in the statute.  This bumps the base amount to acknowledge the cost of
+ * maintaining two households.
+ */
 export function adjustedBasic(basic: number): number {
   return basic * 1.5;
 }
 
-/** Return [p1Pct, p2Pct] given p1 overnights (0..365). */
+/**
+ * Converts Parent 1's number of overnights into simple percentages for each
+ * parent.
+ *
+ * The court form uses percentages, but most people think in nights.  We clamp
+ * the number between 0 and 365, then return Parent 1's slice and Parent 2's
+ * slice of the year.
+ */
 export function overnightPercents(overnightsP1: number): [number, number] {
   const total = 365;
   const p1 = Math.max(0, Math.min(total, overnightsP1));
@@ -15,17 +30,29 @@ export function overnightPercents(overnightsP1: number): [number, number] {
   return [p1 / total, p2 / total];
 }
 
-/** True iff BOTH parents have ≥25% (i.e., ≥92 nights). */
+/**
+ * Checks whether both parents meet the 25% (92 nights) shared-custody
+ * threshold.
+ *
+ * Maryland only allows Worksheet B when each parent keeps the child for at
+ * least a quarter of the year.  This function expresses that rule in code.
+ */
 export function meetsSharedThreshold(overnightsP1: number): boolean {
   const [p1, p2] = overnightPercents(overnightsP1);
   return p1 >= 0.25 && p2 >= 0.25;
 }
 
 /**
- * First slice of Worksheet B:
- * - compute AAI & shares (reuse computeBasic)
- * - check shared threshold (≥25% each). If not, signal “use Worksheet A”.
- * - compute Adjusted Basic = 1.5 × Basic
+ * Handles the opening steps of Worksheet B before we dive into the long math.
+ *
+ * - Reuses the "basic" computation so we have incomes, shares, and the base
+ *   support number.
+ * - If the schedule tops out above the family's income, we mark the case as
+ *   discretionary so a human can decide.
+ * - If the shared threshold fails, we ask the caller to fall back to Worksheet
+ *   A.
+ * - Otherwise we return the adjusted basic amount and the overnight
+ *   percentages that the later steps need.
  */
 export function sharedStarter(
   inputs: S.CaseInputs,
@@ -67,6 +94,7 @@ export function sharedStarter(
   // Check threshold
   const isShared = meetsSharedThreshold(inputs.overnightsParent1);
   if (!isShared) {
+    // Less than 92 nights for either parent triggers a redirect to Worksheet A.
     // Caller should switch to Worksheet A path
     return {
       advisory: null,
@@ -85,6 +113,7 @@ export function sharedStarter(
   const adjBasic = adjustedBasic(base.basic);
   const [pctP1, pctP2] = overnightPercents(inputs.overnightsParent1);
 
+  // Return the building blocks Worksheet B needs for the later steps.
   return {
     advisory: null,
     redirectToWorksheetA: false,
