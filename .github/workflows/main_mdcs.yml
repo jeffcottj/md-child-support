@@ -1,0 +1,55 @@
+name: Build and Deploy to Azure Web App
+
+on:
+  push:
+    branches: [ "main" ]   # ← deploys when main is updated
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # ← REQUIRED for OIDC
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (TypeScript -> dist/)
+        run: npm run build
+
+      # Minimal prod bundle: dist/ + package.json + prod node_modules
+      - name: Prepare deploy bundle
+        run: |
+          rm -rf deploy release.zip
+          mkdir -p deploy
+          cp package*.json deploy/
+          cp -r dist deploy/dist
+          cd deploy
+          npm ci --omit=dev
+          cd ..
+          (cd deploy && zip -r ../release.zip .)
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: mdcs              # ← your Web App name
+          slot-name: Production
+          package: release.zip
