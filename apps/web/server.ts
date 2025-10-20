@@ -1,5 +1,4 @@
-import http from "http";
-import { URLSearchParams } from "url";
+import * as http from "http";
 import { calculateCase } from "../../src/calc";
 import { demoSchedule } from "../../src/schedule";
 import { CaseInputs as CaseInputsSchema } from "../../src/schema";
@@ -336,9 +335,9 @@ function renderPage({ form, result, errors }: RenderOptions): string {
 function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
   if (req.method === "POST" && req.url === "/calculate") {
     let body = "";
-    req.on("data", (chunk) => {
+      req.on("data", (chunk: Buffer) => {
       body += chunk.toString();
-    });
+      });
     req.on("end", () => {
       const params = new URLSearchParams(body);
       const updates: FormState = {};

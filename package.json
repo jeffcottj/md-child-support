@@ -16,7 +16,7 @@
     "web:serve": "ts-node apps/web/server.ts"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "keywords": [],
   "author": "",
