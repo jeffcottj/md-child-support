@@ -1,11 +1,8 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
 name: Build and Deploy to Azure Web App
 
 on:
   push:
-    branches: [ "main" ]  # adjust if you deploy from a different branch
+    branches: [ "main" ]   # ← deploys when main is updated
   workflow_dispatch:
 
 jobs:
@@ -13,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write   # ← REQUIRED for OIDC
 
     steps:
       - name: Checkout
@@ -31,8 +28,8 @@ jobs:
       - name: Build (TypeScript -> dist/)
         run: npm run build
 
-      # Make a minimal prod bundle: dist/ + package.json + prod node_modules
-      - name: Prepare deploy folder
+      # Minimal prod bundle: dist/ + package.json + prod node_modules
+      - name: Prepare deploy bundle
         run: |
           rm -rf deploy release.zip
           mkdir -p deploy
@@ -43,9 +40,16 @@ jobs:
           cd ..
           (cd deploy && zip -r ../release.zip .)
 
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: mdcs            # <-- your Web App name
+          app-name: mdcs              # ← your Web App name
           slot-name: Production
-          package: release.zip     
+          package: release.zip
