@@ -427,7 +427,7 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
                 <input type="number" name="numChildrenThisCase" min="1" required value="${field("numChildrenThisCase")}" />
               </label>
               <label>
-                Parent 1 overnights per year
+                ${field("parent1_name")} overnights per year
                 <input type="number" name="overnightsParent1" min="0" max="365" value="${field("overnightsParent1")}" />
               </label>
             </div>
