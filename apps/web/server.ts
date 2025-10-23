@@ -19,45 +19,70 @@ type StepDefinition = {
   description: string;
 };
 
-const steps: StepDefinition[] = [
-  {
-    id: 1,
-    title: "Welcome",
-    description: "Overview and what to gather before you begin.",
-  },
-  {
-    id: 2,
-    title: "Case participants",
-    description: "Identify the parents, court, and preparer.",
-  },
-  {
-    id: 3,
-    title: "Custody & children",
-    description: "Choose the worksheet path and custody split.",
-  },
-  {
-    id: 4,
-    title: "Parent 1 income",
-    description: "Document monthly income and adjustments.",
-  },
-  {
-    id: 5,
-    title: "Parent 2 income",
-    description: "Document monthly income and adjustments.",
-  },
-  {
-    id: 6,
-    title: "Add-ons & direct pay",
-    description: "Capture expenses and direct payments.",
-  },
-  {
-    id: 7,
-    title: "Review & results",
-    description: "Confirm details and view the calculation.",
-  },
-];
+function getParentDisplayName(form: FormState, parent: "parent1" | "parent2"): string {
+  const key = parent === "parent1" ? "parent1_name" : "parent2_name";
+  const raw = form[key]?.trim();
+  if (raw) {
+    return raw;
+  }
+  return parent === "parent1" ? "Parent 1" : "Parent 2";
+}
 
-const TOTAL_STEPS = steps.length;
+function getParentPossessive(form: FormState, parent: "parent1" | "parent2"): string {
+  const name = getParentDisplayName(form, parent);
+  if (!name) {
+    return parent === "parent1" ? "Parent 1's" : "Parent 2's";
+  }
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return parent === "parent1" ? "Parent 1's" : "Parent 2's";
+  }
+  return trimmed.endsWith("s") ? `${trimmed}'` : `${trimmed}'s`;
+}
+
+function getSteps(form: FormState): StepDefinition[] {
+  const parent1Name = getParentDisplayName(form, "parent1");
+  const parent2Name = getParentDisplayName(form, "parent2");
+  return [
+    {
+      id: 1,
+      title: "Welcome",
+      description: "Overview and what to gather before you begin.",
+    },
+    {
+      id: 2,
+      title: "Case participants",
+      description: "Identify the parents, court, and preparer.",
+    },
+    {
+      id: 3,
+      title: "Custody & children",
+      description: "Choose the worksheet path and custody split.",
+    },
+    {
+      id: 4,
+      title: `${parent1Name} income`,
+      description: `Document monthly income and adjustments for ${parent1Name}.`,
+    },
+    {
+      id: 5,
+      title: `${parent2Name} income`,
+      description: `Document monthly income and adjustments for ${parent2Name}.`,
+    },
+    {
+      id: 6,
+      title: "Add-ons & direct pay",
+      description: "Capture expenses and direct payments.",
+    },
+    {
+      id: 7,
+      title: "Review & results",
+      description: "Confirm details and view the calculation.",
+    },
+  ];
+}
+
+const TOTAL_STEPS = 7;
 
 const defaultForm: FormState = {
   parent1_name: "",
@@ -201,15 +226,17 @@ function renderHiddenInputs(form: FormState, visibleFields: string[]): string {
   return entries.join("");
 }
 
-function renderResult(result: CaseOutputs | null | undefined): string {
+function renderResult(result: CaseOutputs | null | undefined, form: FormState): string {
   if (!result) {
     return "";
   }
 
+  const parent1Name = escapeHtml(getParentDisplayName(form, "parent1"));
+  const parent2Name = escapeHtml(getParentDisplayName(form, "parent2"));
   const direction = result.payor
     ? result.payor === "P1"
-      ? "Parent 1 pays Parent 2"
-      : "Parent 2 pays Parent 1"
+      ? `${parent1Name} pays ${parent2Name}`
+      : `${parent2Name} pays ${parent1Name}`
     : "Discretionary";
   const amount = result.payor
     ? Math.abs(result.recommendedOrderParent1PaysParent2).toLocaleString("en-US", {
@@ -268,10 +295,21 @@ function renderResult(result: CaseOutputs | null | undefined): string {
 }
 
 function renderDataSummary(form: FormState): string {
-  const custodyLabel = form.custodyType === "SHARED" ? "Shared physical custody" : "Primary physical custody";
-  const primaryCustodian = form.primaryCustodian === "P2" ? "Parent 2" : "Parent 1";
+  const parent1Name = getParentDisplayName(form, "parent1");
+  const parent2Name = getParentDisplayName(form, "parent2");
+  const parent1NameEsc = escapeHtml(parent1Name);
+  const parent2NameEsc = escapeHtml(parent2Name);
+  const custodyLabel =
+    form.custodyType === "SHARED"
+      ? "Shared physical custody (each parent has at least 92 overnights)"
+      : "Primary physical custody (one parent has most overnights)";
+  const primaryCustodianName = escapeHtml(
+    form.primaryCustodian === "P2" ? parent2Name : parent1Name
+  );
   const parent1Overnights = readInt(form, "overnightsParent1", 365);
   const parent2Overnights = Math.max(0, 365 - parent1Overnights);
+  const parent1DirectPayHeading = `${parent1NameEsc} direct pay`;
+  const parent2DirectPayHeading = `${parent2NameEsc} direct pay`;
 
   return `
     <section class="review">
@@ -280,8 +318,8 @@ function renderDataSummary(form: FormState): string {
         <div class="summary-card">
           <h3>Participants & court</h3>
           <dl>
-            <dt>Parent 1</dt><dd>${escapeHtml(form.parent1_name || "Parent 1")}</dd>
-            <dt>Parent 2</dt><dd>${escapeHtml(form.parent2_name || "Parent 2")}</dd>
+            <dt>${parent1NameEsc}</dt><dd>${parent1NameEsc === "Parent 1" ? "Enter a name to personalize this label." : "Recorded as Parent 1 on the worksheet."}</dd>
+            <dt>${parent2NameEsc}</dt><dd>${parent2NameEsc === "Parent 2" ? "Enter a name to personalize this label." : "Recorded as Parent 2 on the worksheet."}</dd>
             <dt>Court</dt><dd>${escapeHtml(form.courtName || "—")}</dd>
             <dt>Docket / Case #</dt><dd>${escapeHtml(form.docketNumber || "—")}</dd>
             <dt>Preparer</dt><dd>${escapeHtml(form.preparer_name || "—")}</dd>
@@ -292,14 +330,14 @@ function renderDataSummary(form: FormState): string {
           <h3>Custody profile</h3>
           <dl>
             <dt>Worksheet path</dt><dd>${escapeHtml(custodyLabel)}</dd>
-            <dt>Primary custodian</dt><dd>${escapeHtml(primaryCustodian)}</dd>
+            <dt>Primary custodian</dt><dd>${primaryCustodianName}</dd>
             <dt>Children in this case</dt><dd>${escapeHtml(form.numChildrenThisCase)}</dd>
-            <dt>Parent 1 overnights</dt><dd>${parent1Overnights}</dd>
-            <dt>Parent 2 overnights</dt><dd>${parent2Overnights}</dd>
+            <dt>${parent1NameEsc} overnights</dt><dd>${parent1Overnights}</dd>
+            <dt>${parent2NameEsc} overnights</dt><dd>${parent2Overnights}</dd>
           </dl>
         </div>
         <div class="summary-card">
-          <h3>Parent 1 income</h3>
+          <h3>${parent1NameEsc} income</h3>
           <dl>
             <dt>Actual monthly income</dt><dd>${formatCurrency(form.parent1_actualMonthly)}</dd>
             <dt>Preexisting support paid</dt><dd>${formatCurrency(form.parent1_preexistingSupportPaid)}</dd>
@@ -309,7 +347,7 @@ function renderDataSummary(form: FormState): string {
           </dl>
         </div>
         <div class="summary-card">
-          <h3>Parent 2 income</h3>
+          <h3>${parent2NameEsc} income</h3>
           <dl>
             <dt>Actual monthly income</dt><dd>${formatCurrency(form.parent2_actualMonthly)}</dd>
             <dt>Preexisting support paid</dt><dd>${formatCurrency(form.parent2_preexistingSupportPaid)}</dd>
@@ -331,16 +369,24 @@ function renderDataSummary(form: FormState): string {
         <div class="summary-card">
           <h3>Direct payments</h3>
           <dl>
-            <dt>Parent 1 childcare</dt><dd>${formatCurrency(form.directPay_parent1_childcare)}</dd>
-            <dt>Parent 1 health insurance</dt><dd>${formatCurrency(form.directPay_parent1_healthInsurance)}</dd>
-            <dt>Parent 1 extraordinary medical</dt><dd>${formatCurrency(form.directPay_parent1_extraordinaryMedical)}</dd>
-            <dt>Parent 1 cash medical</dt><dd>${formatCurrency(form.directPay_parent1_cashMedicalIVD)}</dd>
-            <dt>Parent 1 additional expenses</dt><dd>${formatCurrency(form.directPay_parent1_additionalExpenses)}</dd>
-            <dt>Parent 2 childcare</dt><dd>${formatCurrency(form.directPay_parent2_childcare)}</dd>
-            <dt>Parent 2 health insurance</dt><dd>${formatCurrency(form.directPay_parent2_healthInsurance)}</dd>
-            <dt>Parent 2 extraordinary medical</dt><dd>${formatCurrency(form.directPay_parent2_extraordinaryMedical)}</dd>
-            <dt>Parent 2 cash medical</dt><dd>${formatCurrency(form.directPay_parent2_cashMedicalIVD)}</dd>
-            <dt>Parent 2 additional expenses</dt><dd>${formatCurrency(form.directPay_parent2_additionalExpenses)}</dd>
+            <dt>${parent1DirectPayHeading}</dt><dd>
+              <ul>
+                <li>Childcare: ${formatCurrency(form.directPay_parent1_childcare)}</li>
+                <li>Health insurance: ${formatCurrency(form.directPay_parent1_healthInsurance)}</li>
+                <li>Extraordinary medical: ${formatCurrency(form.directPay_parent1_extraordinaryMedical)}</li>
+                <li>Cash medical (IV-D): ${formatCurrency(form.directPay_parent1_cashMedicalIVD)}</li>
+                <li>Additional expenses: ${formatCurrency(form.directPay_parent1_additionalExpenses)}</li>
+              </ul>
+            </dd>
+            <dt>${parent2DirectPayHeading}</dt><dd>
+              <ul>
+                <li>Childcare: ${formatCurrency(form.directPay_parent2_childcare)}</li>
+                <li>Health insurance: ${formatCurrency(form.directPay_parent2_healthInsurance)}</li>
+                <li>Extraordinary medical: ${formatCurrency(form.directPay_parent2_extraordinaryMedical)}</li>
+                <li>Cash medical (IV-D): ${formatCurrency(form.directPay_parent2_cashMedicalIVD)}</li>
+                <li>Additional expenses: ${formatCurrency(form.directPay_parent2_additionalExpenses)}</li>
+              </ul>
+            </dd>
           </dl>
         </div>
       </div>
@@ -361,6 +407,12 @@ type StepHelpers = {
 
 function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutputs | null | undefined, form: FormState): StepTemplate {
   const { field, checked, selected } = helpers;
+  const parent1Name = getParentDisplayName(form, "parent1");
+  const parent2Name = getParentDisplayName(form, "parent2");
+  const parent1NameEsc = escapeHtml(parent1Name);
+  const parent2NameEsc = escapeHtml(parent2Name);
+  const parent1Possessive = escapeHtml(getParentPossessive(form, "parent1"));
+  const parent2Possessive = escapeHtml(getParentPossessive(form, "parent2"));
   switch (step) {
     case 1:
       return {
@@ -368,18 +420,19 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
         content: `
           <section class="step">
             <h2>Welcome to the Maryland child support interview</h2>
-            <p>This guided interview will help you gather the information required to compute the Maryland child support worksheet. You can move back and forth between steps at any time.</p>
+            <p>This guided interview breaks the Maryland child support worksheet into seven short steps. A progress tracker at the top shows where you are, and you can move back and forth between steps at any time to review or change an answer.</p>
+            <p>Each screen explains what a question means and why it matters, so you can feel confident even if you are new to these terms.</p>
             <div class="callout">
-              <h3>What you'll need</h3>
+              <h3>Gather these details before you begin</h3>
               <ul>
-                <li>Parent names and the court docket or case number.</li>
-                <li>Monthly income details for each parent, including any alimony or preexisting support paid.</li>
-                <li>Counts of any additional children living in each parent's home.</li>
-                <li>Child-related add-on expenses such as childcare, health insurance premiums, and extraordinary medical costs.</li>
-                <li>Any direct payments either parent makes toward those add-ons.</li>
+                <li>The names of both parents or caregivers and the court's docket or case number.</li>
+                <li>Monthly income information for each parent, including any alimony or preexisting child support paid or received.</li>
+                <li>The number of additional children who live with each parent full time.</li>
+                <li>Monthly child-related expenses such as childcare, health insurance premiums, extraordinary medical costs, cash medical (IV-D), and other agreed expenses.</li>
+                <li>Amounts each parent already pays directly toward those add-on expenses.</li>
               </ul>
             </div>
-            <p>When you're ready, choose <strong>Next</strong> to begin entering your case information.</p>
+            <p>If you need a break, you can leave this page open in your browser and return later. When you're ready, choose <strong>Next</strong> to begin entering your case information.</p>
           </section>
         `,
       };
@@ -397,11 +450,14 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
         content: `
           <section class="step">
             <h2>Case participants</h2>
-            <p>Provide the identifying details that will appear on the generated worksheet.</p>
+            <p>Provide the identifying details that will appear on the generated worksheet. These names will replace the generic terms “Parent 1” and “Parent 2” throughout the rest of the interview.</p>
+            <p>If you are unsure of a field, leave it blank for now—you can return to this step later. Use the court docket or case number exactly as it appears on your paperwork.</p>
             <div class="grid two">
-              <label>Parent 1 name<input type="text" name="parent1_name" value="${field("parent1_name")}" /></label>
-              <label>Parent 2 name<input type="text" name="parent2_name" value="${field("parent2_name")}" /></label>
+              <label>Parent or caregiver 1 name<input type="text" name="parent1_name" aria-describedby="p1-name-help" value="${field("parent1_name")}" /></label>
+              <label>Parent or caregiver 2 name<input type="text" name="parent2_name" aria-describedby="p2-name-help" value="${field("parent2_name")}" /></label>
             </div>
+            <p id="p1-name-help" class="muted">Example: “Alex Jordan” or “Department of Social Services”.</p>
+            <p id="p2-name-help" class="muted">Example: “Casey Morgan”.</p>
             <div class="grid two">
               <label>Court name<input type="text" name="courtName" value="${field("courtName")}" /></label>
               <label>Docket / case number<input type="text" name="docketNumber" value="${field("docketNumber")}" /></label>
@@ -411,6 +467,7 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
               <label>Preparer role or firm<input type="text" name="preparer_role" value="${field("preparer_role")}" /></label>
               <label>Preparer contact details<input type="text" name="preparer_contact" value="${field("preparer_contact")}" /></label>
             </div>
+            <p class="muted">Include a phone number or email address in the preparer contact field so the court can reach you with questions.</p>
           </section>
         `,
       };
@@ -420,28 +477,30 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
         content: `
           <section class="step">
             <h2>Custody & worksheet selection</h2>
-            <p>These answers determine which worksheet applies and how parenting time is allocated.</p>
+            <p>These answers determine which worksheet applies and how parenting time is allocated. Read each prompt carefully—clear counts of children and overnights prevent worksheet errors later.</p>
+            <p class="muted">Tip: Count overnights as the number of nights a child sleeps in each home during a full year (365 nights total).</p>
             <div class="grid two">
               <label>
                 Number of children in this case
                 <input type="number" name="numChildrenThisCase" min="1" required value="${field("numChildrenThisCase")}" />
               </label>
               <label>
-                ${field("parent1_name")} overnights per year
-                <input type="number" name="overnightsParent1" min="0" max="365" value="${field("overnightsParent1")}" />
+                ${parent1NameEsc} overnights per year
+                <input type="number" name="overnightsParent1" min="0" max="365" aria-describedby="overnights-help" value="${field("overnightsParent1")}" />
               </label>
             </div>
+            <p id="overnights-help" class="muted">Enter the count of nights ${parent1NameEsc} has the children. The other parent automatically receives the remaining nights (365 minus this number).</p>
             <div class="grid two">
               <fieldset class="choice-group">
                 <legend>Custody type</legend>
-                <label><input type="radio" name="custodyType" value="PRIMARY" ${checked("custodyType", "PRIMARY")} /> Primary custody (Worksheet A)</label>
-                <label><input type="radio" name="custodyType" value="SHARED" ${checked("custodyType", "SHARED")} /> Shared custody (Worksheet B)</label>
+                <label><input type="radio" name="custodyType" value="PRIMARY" ${checked("custodyType", "PRIMARY")} /> Primary custody (Worksheet A) — choose this if one parent has fewer than 92 overnights.</label>
+                <label><input type="radio" name="custodyType" value="SHARED" ${checked("custodyType", "SHARED")} /> Shared custody (Worksheet B) — choose this if both parents have at least 92 overnights.</label>
               </fieldset>
               <label>
-                Primary custodian
+                Parent with most overnights
                 <select name="primaryCustodian">
-                  <option value="P1" ${selected("primaryCustodian", "P1")}>Parent 1</option>
-                  <option value="P2" ${selected("primaryCustodian", "P2")}>Parent 2</option>
+                  <option value="P1" ${selected("primaryCustodian", "P1")}>${parent1NameEsc}</option>
+                  <option value="P2" ${selected("primaryCustodian", "P2")}>${parent2NameEsc}</option>
                 </select>
               </label>
             </div>
@@ -460,8 +519,14 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
         ],
         content: `
           <section class="step">
-            <h2>Parent 1 income</h2>
-            <p>Enter monthly figures. Leave a field blank or zero if it does not apply.</p>
+            <h2>${parent1NameEsc} income and adjustments</h2>
+            <p>Enter the monthly figures for ${parent1NameEsc}. Leave a field blank or zero if it does not apply. Use whole dollars or cents as shown on pay stubs or court orders.</p>
+            <ul class="muted">
+              <li><strong>Actual monthly income</strong>: Regular wages, salary, or self-employment income before taxes.</li>
+              <li><strong>Preexisting support paid</strong>: Court-ordered child support from ${parent1Possessive} other cases.</li>
+              <li><strong>Alimony paid / received</strong>: Monthly spousal support ${parent1Possessive} household pays or receives.</li>
+              <li><strong>Additional in-home children</strong>: Number of other children living in ${parent1Possessive} home full time.</li>
+            </ul>
             <div class="grid three">
               <label>Actual monthly income<input type="number" step="0.01" name="parent1_actualMonthly" value="${field("parent1_actualMonthly")}" /></label>
               <label>Preexisting support paid<input type="number" step="0.01" name="parent1_preexistingSupportPaid" value="${field("parent1_preexistingSupportPaid")}" /></label>
@@ -483,8 +548,14 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
         ],
         content: `
           <section class="step">
-            <h2>Parent 2 income</h2>
-            <p>Enter monthly figures. Leave a field blank or zero if it does not apply.</p>
+            <h2>${parent2NameEsc} income and adjustments</h2>
+            <p>Enter the monthly figures for ${parent2NameEsc}. Leave a field blank or zero if it does not apply. Matching documentation for both parents keeps the calculation consistent.</p>
+            <ul class="muted">
+              <li><strong>Actual monthly income</strong>: Regular wages, salary, or self-employment income before taxes.</li>
+              <li><strong>Preexisting support paid</strong>: Court-ordered child support from ${parent2Possessive} other cases.</li>
+              <li><strong>Alimony paid / received</strong>: Monthly spousal support ${parent2Possessive} household pays or receives.</li>
+              <li><strong>Additional in-home children</strong>: Number of other children living in ${parent2Possessive} home full time.</li>
+            </ul>
             <div class="grid three">
               <label>Actual monthly income<input type="number" step="0.01" name="parent2_actualMonthly" value="${field("parent2_actualMonthly")}" /></label>
               <label>Preexisting support paid<input type="number" step="0.01" name="parent2_preexistingSupportPaid" value="${field("parent2_preexistingSupportPaid")}" /></label>
@@ -517,7 +588,14 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
         content: `
           <section class="step">
             <h2>Add-on expenses & direct payments</h2>
-            <p>Include monthly amounts paid for child-related expenses and any direct contributions each parent makes toward them.</p>
+            <p>List the monthly child-related expenses for this case and how much each parent pays directly. Enter whole dollars or cents. If an item does not apply, leave it blank or enter 0.</p>
+            <ul class="muted">
+              <li><strong>Childcare</strong>: Daycare, babysitting, or after-school care needed for work or school.</li>
+              <li><strong>Health insurance</strong>: The portion of a health plan premium that covers the children in this case.</li>
+              <li><strong>Extraordinary medical</strong>: Ongoing costs such as therapy, prescriptions, or special equipment.</li>
+              <li><strong>Cash medical (IV-D)</strong>: Payments required by a IV-D child support order.</li>
+              <li><strong>Additional expenses</strong>: Agreed costs like tutoring, activities, or transportation.</li>
+            </ul>
             <div class="grid three">
               <label>Childcare<input type="number" step="0.01" name="addOns_childcare" value="${field("addOns_childcare")}" /></label>
               <label>Health insurance<input type="number" step="0.01" name="addOns_healthInsurance" value="${field("addOns_healthInsurance")}" /></label>
@@ -527,7 +605,8 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
             </div>
             <div class="direct-pay">
               <div>
-                <h3>Parent 1 direct pay</h3>
+                <h3>${parent1NameEsc} direct pay amounts</h3>
+                <p class="muted">Enter how much ${parent1NameEsc} already pays each month for these expenses.</p>
                 <label>Childcare<input type="number" step="0.01" name="directPay_parent1_childcare" value="${field("directPay_parent1_childcare")}" /></label>
                 <label>Health insurance<input type="number" step="0.01" name="directPay_parent1_healthInsurance" value="${field("directPay_parent1_healthInsurance")}" /></label>
                 <label>Extraordinary medical<input type="number" step="0.01" name="directPay_parent1_extraordinaryMedical" value="${field("directPay_parent1_extraordinaryMedical")}" /></label>
@@ -535,7 +614,8 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
                 <label>Additional expenses<input type="number" step="0.01" name="directPay_parent1_additionalExpenses" value="${field("directPay_parent1_additionalExpenses")}" /></label>
               </div>
               <div>
-                <h3>Parent 2 direct pay</h3>
+                <h3>${parent2NameEsc} direct pay amounts</h3>
+                <p class="muted">Enter how much ${parent2NameEsc} already pays each month for these expenses.</p>
                 <label>Childcare<input type="number" step="0.01" name="directPay_parent2_childcare" value="${field("directPay_parent2_childcare")}" /></label>
                 <label>Health insurance<input type="number" step="0.01" name="directPay_parent2_healthInsurance" value="${field("directPay_parent2_healthInsurance")}" /></label>
                 <label>Extraordinary medical<input type="number" step="0.01" name="directPay_parent2_extraordinaryMedical" value="${field("directPay_parent2_extraordinaryMedical")}" /></label>
@@ -553,9 +633,10 @@ function renderStepContent(step: number, helpers: StepHelpers, result: CaseOutpu
         content: `
           <section class="step">
             <h2>Review & results</h2>
-            <p>Confirm the information below. Use the back button to make changes to any step.</p>
+            <p>Review every section carefully. Use the Back button to make corrections, then return here to refresh the calculation.</p>
+            <p class="muted">The summary below repeats your answers using the parent names you provided so you can spot any typos quickly.</p>
             ${renderDataSummary(form)}
-            ${renderResult(result)}
+            ${renderResult(result, form)}
             ${!result ? '<p class="muted">Complete all required fields to generate a worksheet.</p>' : ""}
           </section>
         `,
@@ -582,7 +663,8 @@ function renderPage({ form, step, result, errors }: RenderOptions): string {
   const template = renderStepContent(step, { field, checked, selected }, result, form);
   const hiddenInputs = renderHiddenInputs(form, template.visibleFields);
 
-  const progress = steps
+  const stepDefinitions = getSteps(form);
+  const progress = stepDefinitions
     .map((definition) => {
       const state = definition.id === step ? "current" : definition.id < step ? "complete" : "upcoming";
       return `
